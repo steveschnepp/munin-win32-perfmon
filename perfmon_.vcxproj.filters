@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="ReadMe.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="stdafx.h">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
@@ -32,5 +29,8 @@
     <ClCompile Include="perfmon_.cpp">
       <Filter>Fichiers sources</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.rst" />
   </ItemGroup>
 </Project>
