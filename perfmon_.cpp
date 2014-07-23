@@ -3,27 +3,10 @@
 
 using namespace std;
 
-const size_t BUFF_SIZE = 4 * 1024 * 1024; // 4MiB
-
-vector<wstring> convertToVectOfString(_TCHAR* str, size_t len) {
-		vector<wstring> strings;
-		_TCHAR* s = str;
-		for (size_t i = 0; i < len; i ++) {
-			if (str[i] != 0) {
-				continue;
-			}
-			auto currentString = wstring(s);
-			if (currentString.size() == 0) break;
-			strings.push_back(currentString);
-			s = str + i + 1;
-		}
-		return strings;
-}
-
 #define _CRT_SECURE_NO_WARNINGS
 
 void dumpPdhObjects();
-
+void getHumanReadableError(DWORD dwErrorCode);
 
 int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 {
@@ -33,6 +16,8 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 		return 0;
 	}
 
+	// There is a method to use english counter names, see
+	// http://support.microsoft.com/kb/287159/en
 	_TCHAR *counter_path = _wgetenv(L"counter_path");
 	if (counter_path == NULL) {
 		wprintf(L"No counter configured\n");
@@ -94,7 +79,6 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 		}
 	}
 
-
 	wprintf(L"counter.value %.20g\n", DisplayValue.doubleValue);
 
 Cleanup:
@@ -116,54 +100,108 @@ void dumpPdhObjects()
 {
 	PDH_STATUS Status;
 
-	vector<wstring> objects;
-	{
-		DWORD len = BUFF_SIZE;
-		PZZWSTR objectList = (PZZWSTR) malloc(len);
-		Status = PdhEnumObjects(0, 0, objectList, &len, PERF_DETAIL_WIZARD, false);
-		if (Status != ERROR_SUCCESS) {
-			wprintf(L"PdhEnumObjects failed with status 0x%x.", Status);
-			return;
-		}
-		objects = convertToVectOfString(objectList, len);
-		free(objectList);
+	DWORD lenObjectList = 0;
+
+	// Get the size to alloc
+	Status = PdhEnumObjects(0, 0, 0, &lenObjectList, PERF_DETAIL_WIZARD, false);
+	if (Status != PDH_MORE_DATA) {
+		wprintf(L"PdhEnumObjects failed with status 0x%x.", Status);
+		getHumanReadableError(Status);
+		return;
 	}
 
-	for (auto i = objects.begin(); i != objects.end(); i ++) {
-		wstring object = *i;
-		DWORD lenCounterList = BUFF_SIZE;
-		PZZWSTR counterList = (PZZWSTR) malloc(lenCounterList);
-		DWORD lenInstanceList = BUFF_SIZE;
-		PZZWSTR instanceList = (PZZWSTR) malloc(lenInstanceList);
-		Status = PdhEnumObjectItems(0, 0, object.c_str(), counterList, &lenCounterList, instanceList, &lenInstanceList, PERF_DETAIL_WIZARD, true);
+	//		wprintf(L"Allocation of %u bytes for objectList \n", len * sizeof(_TCHAR));
+	PZZTSTR objectList = (PZZTSTR) malloc(lenObjectList * sizeof(_TCHAR));
+
+	Status = PdhEnumObjects(0, 0, objectList, &lenObjectList, PERF_DETAIL_WIZARD, false);
+	if (Status != ERROR_SUCCESS) {
+		wprintf(L"PdhEnumObjects failed with status 0x%x.", Status);
+		getHumanReadableError(Status);
+		return;
+	}
+
+	for (PZZWSTR objectListCurrent = objectList; *objectListCurrent != 0; objectListCurrent += wcslen(objectListCurrent) + 1) {
+		DWORD lenCounterList = 0;
+		DWORD lenInstanceList = 0;
+		
+		Status = PdhEnumObjectItems(0, 0, objectListCurrent, 0, &lenCounterList, 0, &lenInstanceList, PERF_DETAIL_WIZARD, true);
+		if (Status != PDH_MORE_DATA) {
+			wprintf(L"PdhEnumObjectItems 1 failed with status 0x%x.", Status);
+			getHumanReadableError(Status);
+			return;
+		}
+
+//		wprintf(L"Allocation of %u bytes for counterList \n", lenCounterList * sizeof(_TCHAR));
+		PZZWSTR counterList = (PZZWSTR) malloc(lenCounterList * sizeof(_TCHAR));
+//		wprintf(L"Allocation of %u bytes for instanceList \n", lenInstanceList * sizeof(_TCHAR));
+		PZZWSTR instanceList = (PZZWSTR) malloc(lenInstanceList * sizeof(_TCHAR));
+
+		Status = PdhEnumObjectItems(0, 0, objectListCurrent, counterList, &lenCounterList, instanceList, &lenInstanceList, PERF_DETAIL_WIZARD, true);
 		if (Status != ERROR_SUCCESS) {
-			wprintf(L"PdhEnumObjectItems failed with status 0x%x.", Status);
+			wprintf(L"PdhEnumObjectItems 2 failed with status 0x%x.", Status);
+			getHumanReadableError(Status);
 			return;
 		}
 		
 		if (lenInstanceList == 0) {
-			auto counters = convertToVectOfString(counterList, lenCounterList);
-			for (auto counterIterator = counters.begin(); counterIterator != counters.end(); counterIterator++) {
-				wstring counterAsStr;
-				counterAsStr +=  wstring(L"\\") + object;
-				counterAsStr +=  wstring(L"\\") + (*counterIterator);
-				wcout << counterAsStr << endl;
+			// Walk the counters list. The list can contain one
+            // or more null-terminated strings. The list is terminated
+            // using two null-terminator characters.
+            for (PZZWSTR counterListCurrent = counterList; *counterListCurrent != 0; counterListCurrent += wcslen(counterListCurrent) + 1) {
+				wprintf(L"\\%s\\%s\n",  objectListCurrent, counterListCurrent);
 			}
 		} else {
-			auto instances = convertToVectOfString(instanceList, lenInstanceList);
-			for (auto instanceIterator = instances.begin(); instanceIterator != instances.end(); instanceIterator++) {
-				auto counters = convertToVectOfString(counterList, lenCounterList);
-				for (auto counterIterator = counters.begin(); counterIterator != counters.end(); counterIterator++) {
-					wstring counterAsStr;
-					counterAsStr +=  wstring(L"\\") + object;
-					counterAsStr +=  wstring(L"(") + (*instanceIterator) + wstring(L")");
-					counterAsStr +=  wstring(L"\\") + (*counterIterator);
-					wcout << counterAsStr << endl;
-				}
+			// Same as before, but both
+			for (PZZWSTR instanceListCurrent = instanceList; *instanceListCurrent != 0; instanceListCurrent += wcslen(instanceListCurrent) + 1) {
+				 for (PZZWSTR counterListCurrent = counterList; *counterListCurrent != 0; counterListCurrent += wcslen(counterListCurrent) + 1) {
+					wprintf(L"\\%s(%s)\\%s\n",  objectListCurrent, instanceListCurrent, counterListCurrent);
+				 }
 			}
 		}
 
+//		wprintf(L"Free of counterList \n");
 		free(counterList);
+		
+//		wprintf(L"Free of instanceList \n");
 		free(instanceList);
 	}
+
+	free(objectList);
+}
+
+#include <pdhmsg.h>
+
+void getHumanReadableError(DWORD dwErrorCode) {
+HANDLE hPdhLibrary = NULL;
+    LPWSTR pMessage = NULL;
+    DWORD_PTR pArgs[] = { (DWORD_PTR)L"<collectionname>" };
+ 
+    hPdhLibrary = LoadLibrary(L"pdh.dll");
+    if (NULL == hPdhLibrary)
+    {
+        wprintf(L"LoadLibrary failed with %lu\n", GetLastError());
+        return;
+    }
+
+    // Use the arguments array if the message contains insertion points, or you
+    // can use FORMAT_MESSAGE_IGNORE_INSERTS to ignore the insertion points.
+
+    if (!FormatMessage(FORMAT_MESSAGE_FROM_HMODULE |
+                       FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                       /*FORMAT_MESSAGE_IGNORE_INSERTS |*/
+                       FORMAT_MESSAGE_ARGUMENT_ARRAY,
+                       hPdhLibrary, 
+                       dwErrorCode,
+                       0,  
+                       (LPWSTR)&pMessage, 
+                       0, 
+                       //NULL))
+                       (va_list*)pArgs))
+    {
+        wprintf(L"Format message failed with 0x%x\n", GetLastError());
+        return;
+    }
+
+    wprintf(L"Formatted message: %s\n", pMessage);
+    LocalFree(pMessage);
 }
