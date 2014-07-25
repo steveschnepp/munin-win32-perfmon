@@ -8,6 +8,29 @@ using namespace std;
 void dumpPdhObjects();
 void getHumanReadableError(DWORD dwErrorCode);
 
+struct perf_counter  {
+	_TCHAR *FieldName;
+	_TCHAR *CounterPath;
+};
+
+struct perf_counters {
+	size_t len;
+	struct perf_counter *counters;
+};
+
+size_t addToPerfCounters(struct perf_counters *perf_counters, struct perf_counter counter) 
+{
+	// Very naive way of allocating a dynamic array
+	// But KISS should work well enough here.
+
+	size_t new_len = perf_counters->len + 1;
+	struct perf_counter *new_counters = (struct perf_counter *) realloc(perf_counters->counters, new_len * sizeof(struct perf_counter));
+	perf_counters->counters = new_counters; 
+	perf_counters->len = new_len;
+	perf_counters->counters[new_len - 1] = counter;
+	return new_len;
+}
+
 int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 {
 	if (argc >= 2 && wcscmp(argv[1], L"list") == 0 )  {
@@ -16,22 +39,77 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 		return 0;
 	}
 
-	// There is a method to use english counter names, see
-	// http://support.microsoft.com/kb/287159/en
-	_TCHAR *counter_path = _wgetenv(L"counter_path");
-	if (counter_path == NULL) {
-		wprintf(L"No counter configured\n");
-		return -1;
+	struct perf_counters counters;
+	counters.counters = NULL;
+	counters.len = 0;
+
+	// Optional support for multiple fields, space separated
+	_TCHAR *fields = _wgetenv(L"graph_order");
+	if (fields == NULL) {
+		// Nothing specified, just use the single field code
+		
+		struct perf_counter counter;
+		// There is a method to use english counter names, see
+		// http://support.microsoft.com/kb/287159/en
+		counter.FieldName = L"field";
+		counter.CounterPath = _wgetenv(L"counter_path");
+		if (counter.CounterPath == NULL) {
+			wprintf(L"No counter configured\n");
+			return -1;
+		}
+
+		addToPerfCounters(&counters, counter);
+	} else {
+		// Transform the fields strings in a Win32 standard PZZTSTR.
+		size_t fieldsLen = wcslen(fields);
+
+		// Replace all spaces by a NULL char
+		_TCHAR *fieldsCurrent = fields;
+		for (_TCHAR *fieldsCurrent = fields; *fieldsCurrent != 0; fieldsCurrent ++) {
+			if (*fieldsCurrent == L' ') *fieldsCurrent = 0;
+		}
+
+		PZZTSTR fieldsAsPZZTSTR = (PZZTSTR) realloc(fields, sizeof(_TCHAR) *  (fieldsLen + 2));
+		
+		// Finish by a double NULL
+		fieldsAsPZZTSTR[fieldsLen] = 0;
+		fieldsAsPZZTSTR[fieldsLen+1] = 0;
+		
+		for (PZZWSTR fieldsCurrent = fieldsAsPZZTSTR; *fieldsCurrent != 0; fieldsCurrent += wcslen(fieldsCurrent) + 1) {
+			struct perf_counter counter;
+			counter.FieldName = fieldsCurrent;
+
+			// XXX - temporary stack_based
+			_TCHAR envPath[256];
+			wsprintf(envPath, L"%s.counter_path", fieldsCurrent );
+
+			counter.CounterPath = _wgetenv(envPath);
+			addToPerfCounters(&counters, counter);
+		}
 	}
+
+	_TCHAR *graph_title = _wgetenv(L"graph_title");
 
 	if (argc >= 2 && wcscmp(argv[1], L"config") == 0 )  {
 		// Send the config
-		wprintf(L"graph_title \n");
-		wprintf(L"field.label %s\n", counter_path);
+		wprintf(L"graph_title %s\n", graph_title);
+
+		for (size_t i = 0; i < counters.len; i ++) {
+			struct perf_counter* c = counters.counters + i;
+			
+			// c shall not be null
+			if (c == 0) {
+				wprintf(L"# counters.counters[%d] is NULL\n", i);
+				continue;
+			}
+			wprintf(L"%s.label %s\n", c->FieldName, c->CounterPath);
+		}
+
 		return 0;
 	}
 
 	_TCHAR *counter_type = _wgetenv(L"counter_type");
+	_TCHAR *counter_path = _wgetenv(L"counter_path");
 
 	PDH_STATUS Status;
     HQUERY Query = NULL;
