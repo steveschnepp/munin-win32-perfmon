@@ -143,7 +143,11 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 			wprintf(L"PdhCollectQueryData failed with 0x%x.\n", Status);
 			goto Cleanup;
 		}
-	    Sleep(1000);
+
+		// We have to wait for at least 1 second.
+		DWORD sleepInMs = 1 * 1000;
+	    Sleep(sleepInMs);
+
 		Status = PdhCollectQueryData(Query);
 		if (Status != ERROR_SUCCESS) {
 			wprintf(L"PdhCollectQueryData failed with 0x%x.\n", Status);
