@@ -33,6 +33,8 @@ size_t addToPerfCounters(struct perf_counters *perf_counters, struct perf_counte
 
 int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 {
+	PDH_STATUS Status;
+
 	if (argc >= 2 && wcscmp(argv[1], L"list") == 0 )  {
 		// Send all the counter paths.
 		dumpPdhObjects();
@@ -43,49 +45,43 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 	counters.counters = NULL;
 	counters.len = 0;
 
-	// Optional support for multiple fields, space separated
-	_TCHAR *fields = _wgetenv(L"graph_order");
-	if (fields == NULL) {
-		// Nothing specified, just use the single field code
-		
+	DWORD PathListLength = 0;
+    HQUERY Query = NULL;
+
+	// We expand the given CounterPath to a number of fields
+	LPCTSTR szWildCardPath = _wgetenv(L"WildCardPath");
+	// Get the size to alloc
+	Status = PdhExpandWildCardPath(0, szWildCardPath, 0, &PathListLength, 0);
+	if (Status != PDH_MORE_DATA) {
+		wprintf(L"PdhExpandWildCardPath failed with status 0x%x.", Status);
+		getHumanReadableError(Status);
+        goto Cleanup;
+	}
+
+	// MSDN says "You must add one to the required size on Windows XP", 
+	// so we just always add 1 for safety 
+	PathListLength += 1;
+
+	//		wprintf(L"Allocation of %u bytes for objectList \n", len * sizeof(_TCHAR));
+	PZZWSTR mszExpandedPathList = (PZZWSTR) malloc(PathListLength * sizeof(_TCHAR));
+
+	Status = PdhExpandWildCardPath(0, szWildCardPath, mszExpandedPathList, &PathListLength, 0);
+	if (Status != ERROR_SUCCESS) {
+		wprintf(L"PdhExpandWildCardPath failed with status 0x%x.", Status);
+		getHumanReadableError(Status);
+        goto Cleanup;
+	}
+
+	for (PZZWSTR Current = mszExpandedPathList; *Current != 0; Current += wcslen(Current) + 1) {
 		struct perf_counter counter;
+		
 		// There is a method to use english counter names, see
 		// http://support.microsoft.com/kb/287159/en
-		counter.FieldName = L"field";
-		counter.CounterPath = _wgetenv(L"counter_path");
-		if (counter.CounterPath == NULL) {
-			wprintf(L"No counter configured\n");
-			return -1;
-		}
-
+		counter.FieldName = (_TCHAR*) malloc(16 * sizeof(_TCHAR));
+		wsprintf(counter.FieldName, L"f_%p", Current); 
+		counter.CounterPath = Current;
+		
 		addToPerfCounters(&counters, counter);
-	} else {
-		// Transform the fields strings in a Win32 standard PZZTSTR.
-		size_t fieldsLen = wcslen(fields);
-
-		// Replace all spaces by a NULL char
-		_TCHAR *fieldsCurrent = fields;
-		for (_TCHAR *fieldsCurrent = fields; *fieldsCurrent != 0; fieldsCurrent ++) {
-			if (*fieldsCurrent == L' ') *fieldsCurrent = 0;
-		}
-
-		PZZTSTR fieldsAsPZZTSTR = (PZZTSTR) realloc(fields, sizeof(_TCHAR) *  (fieldsLen + 2));
-		
-		// Finish by a double NULL
-		fieldsAsPZZTSTR[fieldsLen] = 0;
-		fieldsAsPZZTSTR[fieldsLen+1] = 0;
-		
-		for (PZZWSTR fieldsCurrent = fieldsAsPZZTSTR; *fieldsCurrent != 0; fieldsCurrent += wcslen(fieldsCurrent) + 1) {
-			struct perf_counter counter;
-			counter.FieldName = fieldsCurrent;
-
-			// XXX - temporary stack_based
-			_TCHAR envPath[256];
-			wsprintf(envPath, L"%s.counter_path", fieldsCurrent );
-
-			counter.CounterPath = _wgetenv(envPath);
-			addToPerfCounters(&counters, counter);
-		}
 	}
 
 	_TCHAR *graph_title = _wgetenv(L"graph_title");
@@ -111,8 +107,6 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 	_TCHAR *counter_type = _wgetenv(L"counter_type");
 	_TCHAR *counter_path = _wgetenv(L"counter_path");
 
-	PDH_STATUS Status;
-    HQUERY Query = NULL;
     HCOUNTER Counter;
     PDH_FMT_COUNTERVALUE DisplayValue;
     DWORD CounterType;
@@ -146,7 +140,7 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 
 		// We have to wait for at least 1 second.
 		DWORD sleepInMs = 1 * 1000;
-	    Sleep(sleepInMs);
+		Sleep(sleepInMs);
 
 		Status = PdhCollectQueryData(Query);
 		if (Status != ERROR_SUCCESS) {
