@@ -1,13 +1,6 @@
 ﻿#include "stdafx.h"
 #include <iostream>
 
-using namespace std;
-
-#define _CRT_SECURE_NO_WARNINGS
-
-void dumpPdhObjects();
-void getHumanReadableError(DWORD dwErrorCode);
-
 struct perf_counter  {
 	_TCHAR *FieldName;
 	_TCHAR *CounterPath;
@@ -17,6 +10,11 @@ struct perf_counters {
 	size_t len;
 	struct perf_counter *counters;
 };
+
+void dumpPdhObjects();
+void getHumanReadableError(DWORD dwErrorCode);
+_TCHAR* getFieldName(struct perf_counter *counter);
+
 
 size_t addToPerfCounters(struct perf_counters *perf_counters, struct perf_counter counter) 
 {
