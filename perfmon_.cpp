@@ -93,12 +93,6 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 
 		for (size_t i = 0; i < counters.len; i ++) {
 			struct perf_counter* c = counters.counters + i;
-			
-			// c shall not be null
-			if (c == 0) {
-				wprintf(L"# counters.counters[%d] is NULL\n", i);
-				continue;
-			}
 			wprintf(L"%s.label %s\n", c->FieldName, c->CounterPath);
 		}
 
