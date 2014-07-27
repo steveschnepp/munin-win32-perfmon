@@ -46,8 +46,8 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
     HQUERY Query = NULL;
 
 	// We expand the given CounterPath to a number of fields
-		// There is a method to use english counter names, see
-		// http://support.microsoft.com/kb/287159/en
+	// There is a method to use english counter names, see
+	// http://support.microsoft.com/kb/287159/en
 	_TCHAR* szWildCardPath = _wgetenv(L"WildCardPath");
 	// Get the size to alloc
 	Status = PdhExpandWildCardPath(0, szWildCardPath, 0, &PathListLength, 0);
