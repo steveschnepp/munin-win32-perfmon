@@ -13,8 +13,7 @@ struct perf_counters {
 
 void dumpPdhObjects();
 void getHumanReadableError(DWORD dwErrorCode);
-_TCHAR* getFieldName(struct perf_counter *counter);
-
+void computeFieldName(struct perf_counter *counter);
 
 size_t addToPerfCounters(struct perf_counters *perf_counters, struct perf_counter counter) 
 {
@@ -47,7 +46,9 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
     HQUERY Query = NULL;
 
 	// We expand the given CounterPath to a number of fields
-	LPCTSTR szWildCardPath = _wgetenv(L"WildCardPath");
+		// There is a method to use english counter names, see
+		// http://support.microsoft.com/kb/287159/en
+	_TCHAR* szWildCardPath = _wgetenv(L"WildCardPath");
 	// Get the size to alloc
 	Status = PdhExpandWildCardPath(0, szWildCardPath, 0, &PathListLength, 0);
 	if (Status != PDH_MORE_DATA) {
@@ -73,16 +74,18 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 	for (PZZWSTR Current = mszExpandedPathList; *Current != 0; Current += wcslen(Current) + 1) {
 		struct perf_counter counter;
 		
-		// There is a method to use english counter names, see
-		// http://support.microsoft.com/kb/287159/en
-		counter.FieldName = (_TCHAR*) malloc(16 * sizeof(_TCHAR));
-		wsprintf(counter.FieldName, L"f_%p", Current); 
 		counter.CounterPath = Current;
 		
+		// Compute FieldName
+		computeFieldName(&counter);
+
 		addToPerfCounters(&counters, counter);
 	}
 
 	_TCHAR *graph_title = _wgetenv(L"graph_title");
+	if (graph_title == 0) {
+		graph_title = szWildCardPath;
+	}
 
 	if (argc >= 2 && wcscmp(argv[1], L"config") == 0 )  {
 		// Send the config
@@ -241,6 +244,22 @@ void dumpPdhObjects()
 	}
 
 	free(objectList);
+}
+
+void computeFieldName(struct perf_counter *counter) {
+	// Compute a sortof CRC, to generate the FieldName.
+	// It is not crypto-secure, but we don't care about _intentional_ collisions.
+	DWORD sortofCRC = 0;
+	_TCHAR* current = counter->CounterPath;
+	while(*current) {
+		sortofCRC ^= (DWORD) (*current) + 7 * (sortofCRC << 1);
+		current++;
+	}
+
+	// Max is 7 chars for fields
+	_TCHAR* FieldName = (_TCHAR*) malloc(8 * sizeof(_TCHAR));
+	wsprintf(FieldName, L"f_%x", sortofCRC);
+	counter->FieldName = FieldName;
 }
 
 #include <pdhmsg.h>
