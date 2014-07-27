@@ -4,6 +4,7 @@
 struct perf_counter  {
 	_TCHAR *FieldName;
 	_TCHAR *CounterPath;
+	HCOUNTER Handle;
 };
 
 struct perf_counters {
@@ -99,13 +100,6 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
 		return 0;
 	}
 
-	_TCHAR *counter_type = _wgetenv(L"counter_type");
-	_TCHAR *counter_path = _wgetenv(L"counter_path");
-
-    HCOUNTER Counter;
-    PDH_FMT_COUNTERVALUE DisplayValue;
-    DWORD CounterType;
-
     // Create a query.
     Status = PdhOpenQuery(NULL, NULL, &Query);
     if (Status != ERROR_SUCCESS) {
@@ -113,44 +107,48 @@ int _tmain(int argc, _TCHAR* argv[], _TCHAR* envp[])
        goto Cleanup;
     }
 
-	// Add the selected counter to the query.
-    Status = PdhAddCounter(Query, counter_path, 0, &Counter);
-    if (Status != ERROR_SUCCESS) {
-        wprintf(L"PdhAddCounter failed with status 0x%x.\n", Status);
-        goto Cleanup;
-    }
+	// Add all the selected counters to the query.
+	for (size_t i = 0; i < counters.len; i ++) {
+		struct perf_counter* c = counters.counters + i;
 
-	// Compute a displayable value for the counter.
-    Status = PdhGetFormattedCounterValue(Counter, PDH_FMT_DOUBLE, &CounterType, &DisplayValue);
-	if (Status != ERROR_SUCCESS) {
-		// The first get() failed. This is expected for derived counters
-		// So we have to try, wait a little and retry.
-		// see the Remarks section of
-		// http://msdn.microsoft.com/en-us/library/windows/desktop/aa372637(v=vs.85).aspx
-		Status = PdhCollectQueryData(Query);
+		Status = PdhAddCounter(Query, c->CounterPath, 0, &(c->Handle));
 		if (Status != ERROR_SUCCESS) {
-			wprintf(L"PdhCollectQueryData failed with 0x%x.\n", Status);
-			goto Cleanup;
-		}
-
-		// We have to wait for at least 1 second.
-		DWORD sleepInMs = 1 * 1000;
-		Sleep(sleepInMs);
-
-		Status = PdhCollectQueryData(Query);
-		if (Status != ERROR_SUCCESS) {
-			wprintf(L"PdhCollectQueryData failed with 0x%x.\n", Status);
-			goto Cleanup;
-		}
-	    Status = PdhGetFormattedCounterValue(Counter, PDH_FMT_DOUBLE, &CounterType, &DisplayValue);
-		if (Status != ERROR_SUCCESS) {
-			// Now it *really* fails.
-			wprintf(L"PdhGetFormattedCounterValue failed with status 0x%x.", Status);
+			wprintf(L"PdhAddCounter failed with status 0x%x.\n", Status);
 			goto Cleanup;
 		}
 	}
 
-	wprintf(L"counter.value %.20g\n", DisplayValue.doubleValue);
+	Status = PdhCollectQueryData(Query);
+	if (Status != ERROR_SUCCESS) {
+		wprintf(L"PdhCollectQueryData failed with 0x%x.\n", Status);
+		goto Cleanup;
+	}
+
+	// We just wait for 1 second, in order to work with deriving counters
+	DWORD sleepInMs = 1 * 1000;
+	Sleep(sleepInMs);
+
+	Status = PdhCollectQueryData(Query);
+	if (Status != ERROR_SUCCESS) {
+		wprintf(L"PdhCollectQueryData failed with 0x%x.\n", Status);
+		goto Cleanup;
+	}
+
+	// Fetch the selected counters to the query.
+	for (size_t i = 0; i < counters.len; i ++) {
+		struct perf_counter* c = counters.counters + i;
+
+		PDH_FMT_COUNTERVALUE DisplayValue;
+		DWORD CounterType;
+
+		Status = PdhGetFormattedCounterValue(c->Handle, PDH_FMT_DOUBLE, &CounterType, &DisplayValue);
+		if (Status != ERROR_SUCCESS) {
+			wprintf(L"PdhGetFormattedCounterValue failed with status 0x%x.", Status);
+			goto Cleanup;
+		}
+
+		wprintf(L"%s.value %.20g\n", c->FieldName, DisplayValue.doubleValue);
+	}
 
 Cleanup:
 	// Close the query.
